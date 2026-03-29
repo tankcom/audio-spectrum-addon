@@ -16,9 +16,11 @@ This add-on reads audio from RTSP/RTMP streams, computes an FFT, and publishes H
 ## Ingress GUI
 
 The add-on now provides an Ingress web interface in Home Assistant with three pages:
-- Live Spectrum: real-time bar spectrum similar to mobile spectrum apps
-- Waterfall: scrolling heatmap with history window slider
+- Live Spectrum: real-time high-resolution line spectrum (10 Hz bins up to 20 kHz)
+- Waterfall: scrolling high-resolution heatmap (10 Hz bins) with history window slider
 - Streams: configure RTSP/RTMP stream URLs directly in the UI
+
+Both Live and Waterfall views include a dB color legend (0 dB to -90 dB).
 
 Saving stream settings in the Streams page applies immediately without add-on restart.
 Runtime stream settings are stored in /config/audio_spectrum_streams.json.
@@ -103,6 +105,11 @@ Additional API endpoints used by the GUI:
 - GET /api/waterfall
 - GET /api/config
 - POST /api/config/streams
+
+Detailed spectrum payload:
+- step_hz: 10
+- max_hz: 20000
+- values: array of dB values for each 10 Hz band
 
 ## Examples
 

@@ -15,10 +15,16 @@ const waterfallCanvas = document.getElementById('waterfall-canvas');
 const waterfallInfo = document.getElementById('waterfall-info');
 const historyWindow = document.getElementById('history-window');
 const historyValue = document.getElementById('history-value');
+const viewModeSelect = document.getElementById('view-mode');
 const streamList = document.getElementById('stream-list');
 const addStreamBtn = document.getElementById('add-stream');
 const saveStreamsBtn = document.getElementById('save-streams');
 const saveStatus = document.getElementById('save-status');
+
+state.viewMode = localStorage.getItem('audio-spectrum-view-mode') || 'log';
+if (viewModeSelect) {
+  viewModeSelect.value = state.viewMode;
+}
 
 function setActiveTab(name) {
   tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.tab === name));
@@ -28,10 +34,6 @@ function setActiveTab(name) {
 tabs.forEach((tab) => {
   tab.addEventListener('click', () => setActiveTab(tab.dataset.tab));
 });
-
-function hzKeys() {
-  return Array.from({ length: 40 }, (_, i) => String((i + 1) * 500));
-}
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -45,6 +47,24 @@ function dbToColor(db) {
   return `rgb(${r},${g},${b})`;
 }
 
+function drawDbLegend(ctx, x, y, w, h, minDb, maxDb) {
+  for (let i = 0; i < h; i++) {
+    const ratio = 1 - i / h;
+    const db = minDb + ratio * (maxDb - minDb);
+    ctx.fillStyle = dbToColor(db);
+    ctx.fillRect(x, y + i, w, 1);
+  }
+
+  ctx.strokeStyle = '#486180';
+  ctx.strokeRect(x, y, w, h);
+
+  ctx.fillStyle = '#d8e7fa';
+  ctx.font = '11px sans-serif';
+  ctx.fillText(`${maxDb} dB`, x + w + 6, y + 10);
+  ctx.fillText(`${Math.round((maxDb + minDb) / 2)} dB`, x + w + 6, y + h / 2 + 4);
+  ctx.fillText(`${minDb} dB`, x + w + 6, y + h - 2);
+}
+
 function slugify(value) {
   return String(value || '')
     .trim()
@@ -53,16 +73,42 @@ function slugify(value) {
     .replace(/^-+|-+$/g, '') || 'stream';
 }
 
+function xForFrequency(freqHz, minHz, maxHz, chartW, mode) {
+  const safeFreq = Math.max(freqHz, minHz);
+  if (mode === 'linear') {
+    return ((safeFreq - minHz) / Math.max(1e-9, maxHz - minHz)) * chartW;
+  }
+  const minL = Math.log10(Math.max(minHz, 1e-9));
+  const maxL = Math.log10(Math.max(maxHz, minHz + 1e-9));
+  const fL = Math.log10(Math.max(safeFreq, minHz));
+  return ((fL - minL) / Math.max(1e-9, maxL - minL)) * chartW;
+}
+
+function frequencyForX(x, minHz, maxHz, chartW, mode) {
+  const ratio = clamp(x / Math.max(1, chartW), 0, 1);
+  if (mode === 'linear') {
+    return minHz + ratio * (maxHz - minHz);
+  }
+  const minL = Math.log10(Math.max(minHz, 1e-9));
+  const maxL = Math.log10(Math.max(maxHz, minHz + 1e-9));
+  const valueL = minL + ratio * (maxL - minL);
+  return Math.pow(10, valueL);
+}
+
 function populateStreamSelectors() {
   const liveEntries = Object.values(state.live);
   const configuredEntries = (state.streams || [])
     .filter((s) => s && s.name && s.enabled !== false)
-    .map((s) => ({
-      slug: slugify(s.name),
-      name: s.name,
-      spectrum: state.live[slugify(s.name)]?.spectrum,
-      timestamp: state.live[slugify(s.name)]?.timestamp,
-    }));
+    .map((s) => {
+      const slug = slugify(s.name);
+      return {
+        slug,
+        name: s.name,
+        spectrum: state.live[slug]?.spectrum,
+        detailed: state.live[slug]?.detailed,
+        timestamp: state.live[slug]?.timestamp,
+      };
+    });
 
   const uniqueBySlug = new Map();
   liveEntries.forEach((entry) => uniqueBySlug.set(entry.slug, entry));
@@ -71,6 +117,7 @@ function populateStreamSelectors() {
       uniqueBySlug.set(entry.slug, entry);
     }
   });
+
   const streamEntries = Array.from(uniqueBySlug.values());
   const currentLive = liveStreamSelect.value;
   const currentWaterfall = waterfallStreamSelect.value;
@@ -106,54 +153,85 @@ function renderLiveSpectrum() {
   ctx.fillStyle = '#09111e';
   ctx.fillRect(0, 0, liveCanvas.width, liveCanvas.height);
 
-  if (!entry || !entry.spectrum) {
+  if (!entry || !entry.detailed || !Array.isArray(entry.detailed.values) || !entry.detailed.values.length) {
     liveInfo.textContent = 'No live data yet';
     return;
   }
 
-  const keys = hzKeys();
-  const bars = keys.map((k) => entry.spectrum[k] || { db: -90, peak_freq_hz: 0 });
+  const detailValues = entry.detailed.values;
+  const stepHz = Number(entry.detailed.step_hz || 10);
+  const minHz = stepHz;
+  const maxHz = Number(entry.detailed.max_hz || (detailValues.length * stepHz));
+  const viewMode = state.viewMode === 'linear' ? 'linear' : 'log';
   const width = liveCanvas.width;
   const height = liveCanvas.height;
-  const margin = 40;
-  const chartW = width - margin * 2;
-  const chartH = height - margin * 2;
-  const barW = chartW / bars.length;
+  const marginLeft = 52;
+  const marginRight = 74;
+  const marginTop = 24;
+  const marginBottom = 32;
+  const chartW = width - marginLeft - marginRight;
+  const chartH = height - marginTop - marginBottom;
+  const minDb = -90;
+  const maxDb = 0;
 
   ctx.strokeStyle = '#30425e';
   ctx.lineWidth = 1;
   for (let g = 0; g <= 9; g++) {
-    const y = margin + (chartH / 9) * g;
+    const y = marginTop + (chartH / 9) * g;
     ctx.beginPath();
-    ctx.moveTo(margin, y);
-    ctx.lineTo(width - margin, y);
+    ctx.moveTo(marginLeft, y);
+    ctx.lineTo(width - marginRight, y);
     ctx.stroke();
+
+    const dbLabel = Math.round(maxDb - ((maxDb - minDb) / 9) * g);
+    ctx.fillStyle = '#88a3c1';
+    ctx.font = '10px sans-serif';
+    ctx.fillText(`${dbLabel}`, 18, y + 3);
   }
 
-  bars.forEach((point, i) => {
-    const db = Number(point.db ?? -90);
-    const norm = clamp((db + 90) / 90, 0, 1);
-    const h = norm * chartH;
-    const x = margin + i * barW;
-    const y = margin + chartH - h;
-    ctx.fillStyle = dbToColor(db);
-    ctx.fillRect(x + 1, y, Math.max(1, barW - 2), h);
+  ctx.beginPath();
+  detailValues.forEach((db, i) => {
+    const freq = (i + 1) * stepHz;
+    const x = marginLeft + xForFrequency(freq, minHz, maxHz, chartW, viewMode);
+    const n = clamp((Number(db) - minDb) / (maxDb - minDb), 0, 1);
+    const y = marginTop + (1 - n) * chartH;
+    if (i === 0) {
+      ctx.moveTo(x, y);
+    } else {
+      ctx.lineTo(x, y);
+    }
   });
+  ctx.lineWidth = 1.4;
+  ctx.strokeStyle = '#5ed3ff';
+  ctx.stroke();
 
-  ctx.fillStyle = '#d8e7fa';
-  ctx.font = '12px sans-serif';
-  ctx.fillText('500 Hz', margin, height - 12);
-  ctx.fillText('20 kHz', width - margin - 36, height - 12);
-
-  const strongest = bars.reduce((acc, point, i) => {
-    const db = Number(point.db ?? -90);
-    if (!acc || db > acc.db) return { db, index: i, freq: point.peak_freq_hz };
+  const strongest = detailValues.reduce((acc, db, i) => {
+    const val = Number(db);
+    if (!acc || val > acc.db) {
+      return { db: val, idx: i, freq: (i + 1) * stepHz };
+    }
     return acc;
   }, null);
 
-  liveInfo.textContent = strongest
-    ? `Strongest: ${strongest.db.toFixed(1)} dB at ${strongest.freq} Hz`
-    : 'No peaks detected';
+  if (strongest) {
+    const strongestHz = (strongest.idx + 1) * stepHz;
+    const px = marginLeft + xForFrequency(strongestHz, minHz, maxHz, chartW, viewMode);
+    const py = marginTop + (1 - clamp((strongest.db - minDb) / (maxDb - minDb), 0, 1)) * chartH;
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.arc(px, py, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+    liveInfo.textContent = `Peak: ${strongest.db.toFixed(1)} dB at ${strongest.freq} Hz (10 Hz bins, ${viewMode})`;
+  } else {
+    liveInfo.textContent = 'No peaks detected';
+  }
+
+  ctx.fillStyle = '#d8e7fa';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(`${stepHz} Hz`, marginLeft, height - 10);
+  ctx.fillText(`${maxHz} Hz`, width - marginRight - 44, height - 10);
+
+  drawDbLegend(ctx, width - marginRight + 18, marginTop, 14, chartH, minDb, maxDb);
 
   if (entry.timestamp) {
     const d = new Date(entry.timestamp * 1000);
@@ -164,7 +242,8 @@ function renderLiveSpectrum() {
 function renderWaterfall() {
   const ctx = waterfallCanvas.getContext('2d');
   const slug = waterfallStreamSelect.value;
-  const frames = (slug && state.waterfall[slug]) ? state.waterfall[slug] : [];
+  const streamPayload = (slug && state.waterfall[slug]) ? state.waterfall[slug] : null;
+  const frames = streamPayload && Array.isArray(streamPayload.frames) ? streamPayload.frames : [];
   const frameLimit = Number(historyWindow.value);
   const selectedFrames = frames.slice(-frameLimit);
 
@@ -177,24 +256,52 @@ function renderWaterfall() {
     return;
   }
 
-  const keys = hzKeys();
-  const cols = keys.length;
-  const rows = selectedFrames.length;
-  const cellW = waterfallCanvas.width / cols;
-  const cellH = waterfallCanvas.height / rows;
+  const stepHz = Number(streamPayload.step_hz || 10);
+  const minHz = stepHz;
+  const maxHz = Number(streamPayload.max_hz || 20000);
+  const viewMode = state.viewMode === 'linear' ? 'linear' : 'log';
+  const binCount = selectedFrames[0]?.values?.length || 0;
+  if (!binCount) {
+    waterfallInfo.textContent = 'No detailed bins in waterfall data';
+    return;
+  }
+
+  const minDb = -90;
+  const maxDb = 0;
+  const marginLeft = 52;
+  const marginRight = 74;
+  const marginTop = 16;
+  const marginBottom = 28;
+  const chartW = waterfallCanvas.width - marginLeft - marginRight;
+  const chartH = waterfallCanvas.height - marginTop - marginBottom;
 
   selectedFrames.forEach((frame, row) => {
-    const values = frame.values || {};
-    keys.forEach((key, col) => {
-      const db = Number(values[key]?.db ?? -90);
+    const bins = frame.values || [];
+    const y = marginTop + (row / Math.max(1, selectedFrames.length)) * chartH;
+    const nextY = marginTop + ((row + 1) / Math.max(1, selectedFrames.length)) * chartH;
+    const h = Math.max(1, Math.ceil(nextY - y));
+
+    for (let x = 0; x < chartW; x++) {
+      const freq = frequencyForX(x, minHz, maxHz, chartW - 1, viewMode);
+      const idx = clamp(Math.floor(freq / stepHz) - 1, 0, binCount - 1);
+      const db = Number(bins[idx] ?? minDb);
       ctx.fillStyle = dbToColor(db);
-      ctx.fillRect(col * cellW, row * cellH, Math.ceil(cellW), Math.ceil(cellH));
-    });
+      ctx.fillRect(marginLeft + x, y, 1, h);
+    }
   });
+
+  ctx.fillStyle = '#d8e7fa';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(`${stepHz} Hz`, marginLeft, waterfallCanvas.height - 10);
+  ctx.fillText(`${maxHz} Hz`, waterfallCanvas.width - marginRight - 44, waterfallCanvas.height - 10);
+  ctx.fillText('Past', 8, marginTop + 12);
+  ctx.fillText('Now', 10, marginTop + chartH - 2);
+
+  drawDbLegend(ctx, waterfallCanvas.width - marginRight + 18, marginTop, 14, chartH, minDb, maxDb);
 
   const firstTs = new Date(selectedFrames[0].ts * 1000).toLocaleTimeString();
   const lastTs = new Date(selectedFrames[selectedFrames.length - 1].ts * 1000).toLocaleTimeString();
-  waterfallInfo.textContent = `Frames: ${selectedFrames.length} | ${firstTs} -> ${lastTs}`;
+  waterfallInfo.textContent = `Frames: ${selectedFrames.length} | ${firstTs} -> ${lastTs} | resolution: ${stepHz} Hz | ${viewMode}`;
 }
 
 function streamRowTemplate(stream = { name: '', url: '', enabled: true }) {
@@ -234,7 +341,7 @@ async function refreshLive() {
   const resp = await fetch('./api/live', { cache: 'no-store' });
   const payload = await resp.json();
   state.live = payload.live || {};
-  if (Array.isArray(payload.streams) && payload.streams.length) {
+  if (Array.isArray(payload.streams)) {
     state.streams = payload.streams;
   }
   populateStreamSelectors();
@@ -262,6 +369,15 @@ historyWindow.addEventListener('input', () => {
 
 liveStreamSelect.addEventListener('change', renderLiveSpectrum);
 waterfallStreamSelect.addEventListener('change', renderWaterfall);
+
+if (viewModeSelect) {
+  viewModeSelect.addEventListener('change', () => {
+    state.viewMode = viewModeSelect.value === 'linear' ? 'linear' : 'log';
+    localStorage.setItem('audio-spectrum-view-mode', state.viewMode);
+    renderLiveSpectrum();
+    renderWaterfall();
+  });
+}
 
 addStreamBtn.addEventListener('click', () => {
   streamList.appendChild(streamRowTemplate());
@@ -291,8 +407,8 @@ saveStreamsBtn.addEventListener('click', async () => {
 
 async function boot() {
   await Promise.all([refreshConfig(), refreshLive(), refreshWaterfall()]);
-  setInterval(refreshLive, 1000);
-  setInterval(refreshWaterfall, 2000);
+  setInterval(refreshLive, 700);
+  setInterval(refreshWaterfall, 1200);
 }
 
 boot().catch((err) => {

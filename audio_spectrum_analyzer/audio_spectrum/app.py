@@ -95,13 +95,20 @@ class SharedState:
         async with self._lock:
             self._streams = streams
 
-    async def update_live(self, identity: StreamIdentity, ts: float, spectrum: dict[str, dict[str, float]]) -> None:
+    async def update_live(
+        self,
+        identity: StreamIdentity,
+        ts: float,
+        spectrum: dict[str, dict[str, float]],
+        detailed: dict[str, object],
+    ) -> None:
         async with self._lock:
             self._latest[identity.slug] = {
                 "name": identity.name,
                 "slug": identity.slug,
                 "timestamp": ts,
                 "spectrum": spectrum,
+                "detailed": detailed,
             }
 
     async def live_payload(self) -> dict[str, object]:
@@ -273,13 +280,26 @@ async def run(config: AppConfig) -> None:
                     joined = joined[-config.fft_size :]
                 rolling_buffers[identity.slug] = joined
 
-                spectrum = analyzer.analyze(joined, TARGET_FREQUENCIES_HZ)
+                spectrum, detailed = analyzer.analyze_bundle(
+                    joined,
+                    TARGET_FREQUENCIES_HZ,
+                    detail_step_hz=10,
+                    detail_max_hz=20000,
+                )
                 if not spectrum:
                     continue
 
                 publisher.publish_state(identity, spectrum)
-                await store.add(identity.slug, ts=tick_start, values=spectrum)
-                await state.update_live(identity, tick_start, spectrum)
+                detail_values = detailed.get("values", []) if isinstance(detailed, dict) else []
+                if detail_values:
+                    await store.add(
+                        identity.slug,
+                        ts=tick_start,
+                        values=[float(v) for v in detail_values],
+                        step_hz=int(detailed.get("step_hz", 10)),
+                        max_hz=int(detailed.get("max_hz", 20000)),
+                    )
+                await state.update_live(identity, tick_start, spectrum, detailed)
 
             elapsed = time.time() - tick_start
             await asyncio.sleep(max(0.0, tick_seconds - elapsed))

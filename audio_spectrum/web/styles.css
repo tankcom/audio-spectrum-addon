@@ -40,6 +40,10 @@ h1 {
   padding: 10px 14px;
 }
 
+.view-mode-row {
+  padding: 0 14px 10px;
+}
+
 .tab {
   border: 1px solid #2d384b;
   background: #111722;

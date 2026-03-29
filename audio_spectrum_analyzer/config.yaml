@@ -1,6 +1,6 @@
 name: Audio Spectrum Analyzer
 description: Analyze camera stream audio and publish 500 Hz spectrum sensors to Home Assistant
-version: 0.2.0
+version: 0.3.0
 slug: audio_spectrum_analyzer
 init: false
 startup: services

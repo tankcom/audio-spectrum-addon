@@ -45,8 +45,33 @@ function dbToColor(db) {
   return `rgb(${r},${g},${b})`;
 }
 
+function slugify(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'stream';
+}
+
 function populateStreamSelectors() {
-  const streamEntries = Object.values(state.live);
+  const liveEntries = Object.values(state.live);
+  const configuredEntries = (state.streams || [])
+    .filter((s) => s && s.name && s.enabled !== false)
+    .map((s) => ({
+      slug: slugify(s.name),
+      name: s.name,
+      spectrum: state.live[slugify(s.name)]?.spectrum,
+      timestamp: state.live[slugify(s.name)]?.timestamp,
+    }));
+
+  const uniqueBySlug = new Map();
+  liveEntries.forEach((entry) => uniqueBySlug.set(entry.slug, entry));
+  configuredEntries.forEach((entry) => {
+    if (!uniqueBySlug.has(entry.slug)) {
+      uniqueBySlug.set(entry.slug, entry);
+    }
+  });
+  const streamEntries = Array.from(uniqueBySlug.values());
   const currentLive = liveStreamSelect.value;
   const currentWaterfall = waterfallStreamSelect.value;
   liveStreamSelect.innerHTML = '';
@@ -206,25 +231,28 @@ function collectStreamsFromUi() {
 }
 
 async function refreshLive() {
-  const resp = await fetch('/api/live', { cache: 'no-store' });
+  const resp = await fetch('./api/live', { cache: 'no-store' });
   const payload = await resp.json();
   state.live = payload.live || {};
-  state.streams = payload.streams || [];
+  if (Array.isArray(payload.streams) && payload.streams.length) {
+    state.streams = payload.streams;
+  }
   populateStreamSelectors();
   renderLiveSpectrum();
 }
 
 async function refreshWaterfall() {
-  const resp = await fetch('/api/waterfall', { cache: 'no-store' });
+  const resp = await fetch('./api/waterfall', { cache: 'no-store' });
   state.waterfall = await resp.json();
   renderWaterfall();
 }
 
 async function refreshConfig() {
-  const resp = await fetch('/api/config', { cache: 'no-store' });
+  const resp = await fetch('./api/config', { cache: 'no-store' });
   const payload = await resp.json();
   state.streams = payload.streams || [];
   renderSettings();
+  populateStreamSelectors();
 }
 
 historyWindow.addEventListener('input', () => {
@@ -242,7 +270,7 @@ addStreamBtn.addEventListener('click', () => {
 saveStreamsBtn.addEventListener('click', async () => {
   const streams = collectStreamsFromUi();
   saveStatus.textContent = 'Saving...';
-  const resp = await fetch('/api/config/streams', {
+  const resp = await fetch('./api/config/streams', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ streams }),
@@ -256,6 +284,7 @@ saveStreamsBtn.addEventListener('click', async () => {
   const payload = await resp.json();
   state.streams = payload.streams || streams;
   saveStatus.textContent = 'Saved. Stream workers reconfigured.';
+  await refreshConfig();
   await refreshLive();
   await refreshWaterfall();
 });

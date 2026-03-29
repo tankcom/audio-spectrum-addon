@@ -95,6 +95,45 @@ function frequencyForX(x, minHz, maxHz, chartW, mode) {
   return Math.pow(10, valueL);
 }
 
+function formatHz(freqHz) {
+  if (freqHz >= 1000) {
+    const k = freqHz / 1000;
+    return Number.isInteger(k) ? `${k}k` : `${k.toFixed(1)}k`;
+  }
+  return `${Math.round(freqHz)}`;
+}
+
+function getAxisTicks(minHz, maxHz, mode) {
+  const logTicks = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 8000, 10000, 12000, 16000, 20000];
+  const linearTicks = [10, 1000, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000, 20000];
+  const source = mode === 'linear' ? linearTicks : logTicks;
+  return source.filter((f) => f >= minHz && f <= maxHz);
+}
+
+function drawFrequencyAxis(ctx, minHz, maxHz, mode, chartX, chartY, chartW, chartH) {
+  const ticks = getAxisTicks(minHz, maxHz, mode);
+  ctx.font = '11px sans-serif';
+
+  ticks.forEach((freq) => {
+    const x = chartX + xForFrequency(freq, minHz, maxHz, chartW, mode);
+
+    ctx.strokeStyle = '#223249';
+    ctx.beginPath();
+    ctx.moveTo(x, chartY);
+    ctx.lineTo(x, chartY + chartH);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#6f89a8';
+    ctx.beginPath();
+    ctx.moveTo(x, chartY + chartH);
+    ctx.lineTo(x, chartY + chartH + 5);
+    ctx.stroke();
+
+    ctx.fillStyle = '#9db4cf';
+    ctx.fillText(formatHz(freq), x - 12, chartY + chartH + 18);
+  });
+}
+
 function populateStreamSelectors() {
   const liveEntries = Object.values(state.live);
   const configuredEntries = (state.streams || [])
@@ -158,7 +197,9 @@ function renderLiveSpectrum() {
     return;
   }
 
-  const detailValues = entry.detailed.values;
+  const rawValues = entry.detailed.values.map((v) => Number(v));
+  const framePeakDb = rawValues.length ? Math.max(...rawValues) : 0;
+  const detailValues = rawValues.map((v) => clamp(v - framePeakDb, -90, 0));
   const stepHz = Number(entry.detailed.step_hz || 10);
   const minHz = stepHz;
   const maxHz = Number(entry.detailed.max_hz || (detailValues.length * stepHz));
@@ -173,6 +214,8 @@ function renderLiveSpectrum() {
   const chartH = height - marginTop - marginBottom;
   const minDb = -90;
   const maxDb = 0;
+
+  drawFrequencyAxis(ctx, minHz, maxHz, viewMode, marginLeft, marginTop, chartW, chartH);
 
   ctx.strokeStyle = '#30425e';
   ctx.lineWidth = 1;
@@ -205,7 +248,7 @@ function renderLiveSpectrum() {
   ctx.strokeStyle = '#5ed3ff';
   ctx.stroke();
 
-  const strongest = detailValues.reduce((acc, db, i) => {
+  const strongest = rawValues.reduce((acc, db, i) => {
     const val = Number(db);
     if (!acc || val > acc.db) {
       return { db: val, idx: i, freq: (i + 1) * stepHz };
@@ -221,15 +264,15 @@ function renderLiveSpectrum() {
     ctx.beginPath();
     ctx.arc(px, py, 3.2, 0, Math.PI * 2);
     ctx.fill();
-    liveInfo.textContent = `Peak: ${strongest.db.toFixed(1)} dB at ${strongest.freq} Hz (10 Hz bins, ${viewMode})`;
+    liveInfo.textContent = `Peak: ${strongest.db.toFixed(1)} dB at ${strongest.freq} Hz | display normalized to frame peak (10 Hz, ${viewMode})`;
   } else {
     liveInfo.textContent = 'No peaks detected';
   }
 
   ctx.fillStyle = '#d8e7fa';
   ctx.font = '12px sans-serif';
-  ctx.fillText(`${stepHz} Hz`, marginLeft, height - 10);
-  ctx.fillText(`${maxHz} Hz`, width - marginRight - 44, height - 10);
+  ctx.fillText(`scale: ${viewMode}`, marginLeft, height - 10);
+  ctx.fillText(`max: ${maxHz} Hz`, width - marginRight - 64, height - 10);
 
   drawDbLegend(ctx, width - marginRight + 18, marginTop, 14, chartH, minDb, maxDb);
 
@@ -275,6 +318,19 @@ function renderWaterfall() {
   const chartW = waterfallCanvas.width - marginLeft - marginRight;
   const chartH = waterfallCanvas.height - marginTop - marginBottom;
 
+  let globalPeakDb = -9999;
+  selectedFrames.forEach((frame) => {
+    const bins = frame.values || [];
+    bins.forEach((v) => {
+      const n = Number(v);
+      if (n > globalPeakDb) {
+        globalPeakDb = n;
+      }
+    });
+  });
+
+  drawFrequencyAxis(ctx, minHz, maxHz, viewMode, marginLeft, marginTop, chartW, chartH);
+
   selectedFrames.forEach((frame, row) => {
     const bins = frame.values || [];
     const y = marginTop + (row / Math.max(1, selectedFrames.length)) * chartH;
@@ -284,7 +340,8 @@ function renderWaterfall() {
     for (let x = 0; x < chartW; x++) {
       const freq = frequencyForX(x, minHz, maxHz, chartW - 1, viewMode);
       const idx = clamp(Math.floor(freq / stepHz) - 1, 0, binCount - 1);
-      const db = Number(bins[idx] ?? minDb);
+      const dbRaw = Number(bins[idx] ?? minDb);
+      const db = clamp(dbRaw - globalPeakDb, -90, 0);
       ctx.fillStyle = dbToColor(db);
       ctx.fillRect(marginLeft + x, y, 1, h);
     }
@@ -292,8 +349,8 @@ function renderWaterfall() {
 
   ctx.fillStyle = '#d8e7fa';
   ctx.font = '12px sans-serif';
-  ctx.fillText(`${stepHz} Hz`, marginLeft, waterfallCanvas.height - 10);
-  ctx.fillText(`${maxHz} Hz`, waterfallCanvas.width - marginRight - 44, waterfallCanvas.height - 10);
+  ctx.fillText(`scale: ${viewMode}`, marginLeft, waterfallCanvas.height - 10);
+  ctx.fillText(`max: ${maxHz} Hz`, waterfallCanvas.width - marginRight - 64, waterfallCanvas.height - 10);
   ctx.fillText('Past', 8, marginTop + 12);
   ctx.fillText('Now', 10, marginTop + chartH - 2);
 
@@ -301,7 +358,7 @@ function renderWaterfall() {
 
   const firstTs = new Date(selectedFrames[0].ts * 1000).toLocaleTimeString();
   const lastTs = new Date(selectedFrames[selectedFrames.length - 1].ts * 1000).toLocaleTimeString();
-  waterfallInfo.textContent = `Frames: ${selectedFrames.length} | ${firstTs} -> ${lastTs} | resolution: ${stepHz} Hz | ${viewMode}`;
+  waterfallInfo.textContent = `Frames: ${selectedFrames.length} | ${firstTs} -> ${lastTs} | resolution: ${stepHz} Hz | ${viewMode} | normalized to ${globalPeakDb.toFixed(1)} dB peak`;
 }
 
 function streamRowTemplate(stream = { name: '', url: '', enabled: true }) {

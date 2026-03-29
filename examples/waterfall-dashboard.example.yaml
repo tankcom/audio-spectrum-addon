@@ -1,0 +1,19 @@
+title: Audio Spectrum
+views:
+  - title: Waterfall
+    path: waterfall
+    cards:
+      - type: markdown
+        content: |
+          Waterfall JSON endpoint:
+          http://<addon-host>:8099/waterfall
+      - type: entities
+        title: Sample Frequency Sensors
+        entities:
+          - sensor.front_camera_500_hz
+          - sensor.front_camera_1000_hz
+          - sensor.front_camera_1500_hz
+          - sensor.front_camera_2000_hz
+          - sensor.front_camera_5000_hz
+          - sensor.front_camera_10000_hz
+          - sensor.front_camera_20000_hz

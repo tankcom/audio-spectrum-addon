@@ -1,0 +1,52 @@
+name: Audio Spectrum Analyzer
+description: Analyze camera stream audio and publish 500 Hz spectrum sensors to Home Assistant
+version: 0.1.0
+slug: audio_spectrum_analyzer
+init: false
+startup: services
+boot: auto
+homeassistant_api: false
+hassio_api: false
+host_network: false
+map:
+  - addon_config:rw
+options:
+  streams: []
+  sample_rate: 48000
+  fft_size: 8192
+  update_interval_ms: 250
+  window_function: hann
+  rest:
+    enabled: true
+    host: 0.0.0.0
+    port: 8099
+  mqtt:
+    host: core-mosquitto
+    port: 1883
+    username: ""
+    password: ""
+    discovery_prefix: homeassistant
+    base_topic: audio_spectrum
+schema:
+  streams:
+    - name: str
+      url: str
+      enabled: bool?
+  sample_rate: int(8000,96000)?
+  fft_size: list(4096|8192|16384)?
+  update_interval_ms: int(100,5000)?
+  window_function: list(hann|hamming|blackman)?
+  rest:
+    enabled: bool?
+    host: str?
+    port: int(1,65535)?
+  mqtt:
+    host: str
+    port: int(1,65535)?
+    username: str?
+    password: password?
+    discovery_prefix: str?
+    base_topic: str?
+arch:
+  - aarch64
+  - amd64

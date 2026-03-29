@@ -13,6 +13,16 @@ The add-on folder is:
 
 This add-on reads audio from RTSP/RTMP streams, computes an FFT, and publishes Home Assistant MQTT discovery sensors in 500 Hz steps from 500 Hz to 20000 Hz.
 
+## Ingress GUI
+
+The add-on now provides an Ingress web interface in Home Assistant with three pages:
+- Live Spectrum: real-time bar spectrum similar to mobile spectrum apps
+- Waterfall: scrolling heatmap with history window slider
+- Streams: configure RTSP/RTMP stream URLs directly in the UI
+
+Saving stream settings in the Streams page applies immediately without add-on restart.
+Runtime stream settings are stored in /config/audio_spectrum_streams.json.
+
 ## Status
 
 Initial implementation with:
@@ -87,6 +97,12 @@ The add-on exposes a simple JSON endpoint for waterfall consumers:
 Response format:
 - Object keyed by stream slug
 - Each stream contains frames with timestamp and frequency->dB map
+
+Additional API endpoints used by the GUI:
+- GET /api/live
+- GET /api/waterfall
+- GET /api/config
+- POST /api/config/streams
 
 ## Examples
 

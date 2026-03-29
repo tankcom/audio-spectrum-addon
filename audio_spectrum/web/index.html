@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio Spectrum Analyzer</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Audio Spectrum Analyzer</h1>
+    <p class="subtitle">Live spectrum, waterfall history and stream management</p>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="live">Live Spectrum</button>
+    <button class="tab" data-tab="waterfall">Waterfall</button>
+    <button class="tab" data-tab="settings">Streams</button>
+  </nav>
+
+  <main>
+    <section id="tab-live" class="panel active">
+      <div class="row">
+        <label for="live-stream">Stream</label>
+        <select id="live-stream"></select>
+        <span id="live-ts" class="muted"></span>
+      </div>
+      <canvas id="live-canvas" width="1200" height="420"></canvas>
+      <div id="live-info" class="muted"></div>
+    </section>
+
+    <section id="tab-waterfall" class="panel">
+      <div class="row">
+        <label for="waterfall-stream">Stream</label>
+        <select id="waterfall-stream"></select>
+        <label for="history-window">Frames</label>
+        <input id="history-window" type="range" min="120" max="2400" step="120" value="1200">
+        <span id="history-value">1200</span>
+      </div>
+      <canvas id="waterfall-canvas" width="1200" height="500"></canvas>
+      <div id="waterfall-info" class="muted"></div>
+    </section>
+
+    <section id="tab-settings" class="panel">
+      <p class="muted">Configure RTSP/RTMP streams. Save applies immediately without add-on restart.</p>
+      <div id="stream-list"></div>
+      <div class="row">
+        <button id="add-stream">Add Stream</button>
+        <button id="save-streams" class="primary">Save</button>
+      </div>
+      <div id="save-status" class="muted"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

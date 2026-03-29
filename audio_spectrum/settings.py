@@ -65,9 +65,6 @@ def load_config(options_file: str) -> AppConfig:
             continue
         streams.append(StreamConfig(name=name, url=url, enabled=_as_bool(item.get("enabled", True), True)))
 
-    if not streams:
-        raise ValueError("No valid streams configured. Add at least one stream with name and url.")
-
     mqtt_raw = raw.get("mqtt", {})
     mqtt = MqttConfig(
         host=str(mqtt_raw.get("host", "core-mosquitto")),
@@ -102,8 +99,6 @@ def load_config(options_file: str) -> AppConfig:
         window_function = "hann"
 
     enabled_streams = [s for s in streams if s.enabled]
-    if not enabled_streams:
-        raise ValueError("All streams are disabled. Enable at least one stream.")
 
     return AppConfig(
         streams=enabled_streams,
